@@ -302,44 +302,72 @@ impl Setting {
 }
 
 pub struct Settings {
-    pub max_concurrent_streams: Setting,
-    pub initial_window_size: Setting,
-    pub max_frame_size: Setting,
-    pub max_header_list_size: Setting,
+    pub settings: Vec<Setting>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            settings: vec![
+                Setting::new(0x03, 100), // Max Concurrent Streams
+                Setting::new(0x04, 65535), // Initial Window Size
+                Setting::new(0x05, 16384), // Max Frame Size
+                Setting::new(0x06, 0) // Max Header List Size
+            ],
+        }
+    }
 }
 
 impl Settings {
     pub async fn new() -> Self {
         Settings {
-            max_concurrent_streams: Setting::new(0x03, 100),
-            initial_window_size: Setting::new(0x04, 65535),
-            max_frame_size: Setting::new(0x05, 16384),
-            max_header_list_size: Setting::new(0x06, 262144),
+            settings: Vec::new(),
         }
     }
 
-    pub async fn serialize(&self) -> Vec<u8> {
+    pub async fn write_settings_ack() -> Vec<u8> {
+        vec![0, 0, 0, 4, 1, 0, 0, 0, 0]
+    }
+
+    pub async fn from_pairs(pairs: Vec<(u16, u32)>) -> Self {
+        let mut settings = Settings::new().await;
+
+        for (id, value) in pairs {
+            settings.settings.push(Setting::new(id, value));
+        }
+
+        settings
+    }
+
+    pub async fn serialize(self) -> Vec<u8> {
         let mut payload = Vec::new();
 
-        for setting in [
-            &self.max_concurrent_streams,
-            &self.initial_window_size,
-            &self.max_frame_size,
-            &self.max_header_list_size,
-        ] {
+        for setting in self.settings {
             payload.extend_from_slice(&setting.id.to_be_bytes());
             payload.extend_from_slice(&setting.value.to_be_bytes());
         }
 
-        let mut serialized = Vec::with_capacity(9 + payload.len());
+        payload
+    }
+}
 
-        serialized.extend_from_slice(&(payload.len() as u32).to_be_bytes()[1..]);
-        serialized.extend_from_slice(&[4, 0]);
-        serialized.extend_from_slice(&(0u32).to_be_bytes());
-        // serialized.extend_from_slice(&[(1 >> 24) as u8, (1 >> 16) as u8, (1 >> 8) as u8, 1 as u8]);
+pub struct SettingsBuilder {
+    settings: Vec<(u16, u32)>,
+}
+impl SettingsBuilder {
+    pub fn new() -> Self {
+        SettingsBuilder { settings: Vec::new() }
+    }
 
-        serialized.extend_from_slice(&payload);
+    pub fn add_setting(mut self, id: u16, value: u32) -> Self {
+        self.settings.push((id, value));
+        self
+    }
 
-        serialized
+    pub async fn build(self) -> FrameWriter {
+        let settings = Settings::from_pairs(self.settings).await;
+        let payload = settings.serialize().await;
+
+        FrameWriter::new(FrameType::SETTINGS, FrameFlags::NONE, 0, payload)
     }
 }
