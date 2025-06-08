@@ -2,6 +2,8 @@
 name = "rust-http2"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "HTTP/2 Frame Parsing for Rust" 
 
 [dependencies]
 hpack = "0.3.0"
