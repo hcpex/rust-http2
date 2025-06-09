@@ -6,4 +6,5 @@ license = "MIT"
 description = "HTTP/2 Frame Parsing for Rust" 
 
 [dependencies]
+bitflags = "2.9.1"
 hpack = "0.3.0"

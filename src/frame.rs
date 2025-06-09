@@ -1,3 +1,4 @@
+use bitflags::bitflags;
 use hpack::Encoder;
 
 pub enum FrameType {
@@ -52,41 +53,61 @@ impl TryInto<u8> for FrameType {
     }
 }
 
-pub enum FrameFlags {
-    ENDSTREAM = 0x01,
-    ENDHEADERS = 0x04,
-    PADDED = 0x08,
-    PRIORITY = 0x20,
-    NONE = 0x00,
-}
-
-impl TryFrom<u8> for FrameFlags {
-    type Error = &'static str;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0x01 => Ok(FrameFlags::ENDSTREAM),
-            0x04 => Ok(FrameFlags::ENDHEADERS),
-            0x08 => Ok(FrameFlags::PADDED),
-            0x20 => Ok(FrameFlags::PRIORITY),
-            _ => Ok(FrameFlags::NONE),
-        }
+bitflags! {
+    #[derive(PartialEq)]
+    pub struct FrameFlags: u8 {
+        const ENDSTREAM = 0x01;
+        const ENDHEADERS = 0x04;
+        const PADDED = 0x08;
+        const PRIORITY = 0x20;
+        const NONE = 0x00;
     }
 }
 
-impl TryInto<u8> for FrameFlags {
-    type Error = &'static str;
-
-    fn try_into(self) -> Result<u8, Self::Error> {
+impl std::fmt::Display for FrameType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FrameFlags::ENDSTREAM => Ok(0x01),
-            FrameFlags::ENDHEADERS => Ok(0x04),
-            FrameFlags::PADDED => Ok(0x08),
-            FrameFlags::PRIORITY => Ok(0x20),
-            FrameFlags::NONE => Ok(0x00),
+            FrameType::DATA => write!(f, "DATA"),
+            FrameType::HEADERS => write!(f, "HEADERS"),
+            FrameType::PRIORITY => write!(f, "PRIORITY"),
+            FrameType::RSTSTREAM => write!(f, "RSTSTREAM"),
+            FrameType::SETTINGS => write!(f, "SETTINGS"),
+            FrameType::PUSHPROMISE => write!(f, "PUSHPROMISE"),
+            FrameType::PING => write!(f, "PING"),
+            FrameType::GOAWAY => write!(f, "GOAWAY"),
+            FrameType::WINDOWUPDATE => write!(f, "WINDOWUPDATE"),
+            FrameType::CONTINUATION => write!(f, "CONTINUATION"),
         }
     }
 }
+
+// impl TryFrom<u8> for FrameFlags {
+//     type Error = &'static str;
+
+//     fn try_from(value: u8) -> Result<Self, Self::Error> {
+//         match value {
+//             0x01 => Ok(FrameFlags::ENDSTREAM),
+//             0x04 => Ok(FrameFlags::ENDHEADERS),
+//             0x08 => Ok(FrameFlags::PADDED),
+//             0x20 => Ok(FrameFlags::PRIORITY),
+//             _ => Ok(FrameFlags::NONE),
+//         }
+//     }
+// }
+
+// impl TryInto<u8> for FrameFlags {
+//     type Error = &'static str;
+
+//     fn try_into(self) -> Result<u8, Self::Error> {
+//         match self {
+//             FrameFlags::ENDSTREAM => Ok(0x01),
+//             FrameFlags::ENDHEADERS => Ok(0x04),
+//             FrameFlags::PADDED => Ok(0x08),
+//             FrameFlags::PRIORITY => Ok(0x20),
+//             FrameFlags::NONE => Ok(0x00),
+//         }
+//     }
+// }
 
 pub struct FrameWriter {
     pub frame_type: FrameType,
@@ -156,7 +177,7 @@ impl FrameWriter {
 
         serialized.extend_from_slice(&self.payload_len.to_be_bytes()[1..]);
         serialized.push(FrameType::try_into(self.frame_type)?);
-        serialized.push(FrameFlags::try_into(self.flags)?);
+        serialized.push(self.flags.bits());
         serialized.extend_from_slice(
             &[
                 (self.stream_id >> 24) as u8,
@@ -186,14 +207,14 @@ impl FrameReader {
     // }
 
     pub async fn read_frame(buf: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
-        let payload_len = ((buf[0] as u32) << 16) | ((buf[1] as u32) << 8) | (buf[2] as u32);
-
-        if buf.len() < 9 + (payload_len as usize) {
+        if buf.len() < 9 {
             return Err("Buffer too small".into());
         }
 
+        let payload_len = ((buf[0] as u32) << 16) | ((buf[1] as u32) << 8) | (buf[2] as u32);
+
         let frame_type = FrameType::try_from(buf[3])?;
-        let flags = FrameFlags::try_from(buf[4])?;
+        let flags = FrameFlags::from_bits_truncate(buf[4]);
         let stream_id = u32::from_be_bytes([buf[5], buf[6], buf[7], buf[8]]) & 0x7fff_ffff;
         let payload = buf[9..9 + (payload_len as usize)].to_vec();
 
@@ -259,7 +280,14 @@ impl HeadersBuilder {
         let headers = FrameHeaders::from_pairs(self.headers);
         let payload = headers.serialize();
 
-        Ok(FrameWriter::new(FrameType::HEADERS, FrameFlags::ENDHEADERS, stream_id, payload))
+        Ok(
+            FrameWriter::new(
+                FrameType::HEADERS,
+                FrameFlags::ENDHEADERS | FrameFlags::ENDSTREAM,
+                stream_id,
+                payload
+            )
+        )
     }
 }
 
